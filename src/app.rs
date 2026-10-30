@@ -975,13 +975,6 @@ impl App {
                     open_url(URL_GITEE);
                 }
             });
-
-            ui.add_space(18.0);
-            ui.label(
-                egui::RichText::new(tr.about_thanks())
-                    .size(12.5)
-                    .color(palette.muted),
-            );
         });
     }
 }

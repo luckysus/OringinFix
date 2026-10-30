@@ -77,13 +77,6 @@ impl Tr {
     pub fn about_repo(self) -> &'static str {
         if self.zh() { "开源仓库" } else { "Repositories" }
     }
-    pub fn about_thanks(self) -> &'static str {
-        if self.zh() {
-            "基于 egui / tray-icon 等开源组件"
-        } else {
-            "Built with egui, tray-icon, and other open-source work"
-        }
-    }
     pub fn clean_stale(self) -> &'static str {
         if self.zh() { "清理残留" } else { "Clean leftovers" }
     }
