@@ -49,7 +49,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             auto_clean: true,
-            interval_secs: 5,
+            interval_secs: 8,
             start_with_windows: false,
             close_behavior: CloseBehavior::Tray,
             silent_start: true,

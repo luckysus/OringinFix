@@ -1,6 +1,6 @@
 [package]
 name = "OringinFix"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Safe cleaner for leftover OriginLab Origin (Origin64.exe) background processes on Windows"
 authors = ["su <1853097312@qq.com>"]

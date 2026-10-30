@@ -1,6 +1,6 @@
 //! GUI + 托盘。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -63,8 +63,8 @@ struct Shared {
     hwnd: AtomicIsize,
     /// 显示窗口时置位，UI 侧刷新列表
     need_refresh: AtomicBool,
-    /// 曾见过可见窗口的 Origin PID；用于区分「PPT 正在启动」和「编辑后关掉」。
-    ever_windowed: Mutex<HashSet<u32>>,
+    /// 上次见到可见窗口的时间：关窗宽限 + 区分 PPT 未出窗的 Embedding。
+    last_windowed: Mutex<HashMap<u32, Instant>>,
     language: Mutex<Language>,
     theme: Mutex<ThemeMode>,
     /// UI 侧显示「已更新」闪烁
@@ -113,7 +113,7 @@ pub fn run(silent: bool) -> eframe::Result<()> {
         allow_exit: AtomicBool::new(false),
         hwnd: AtomicIsize::new(0),
         need_refresh: AtomicBool::new(true),
-        ever_windowed: Mutex::new(HashSet::new()),
+        last_windowed: Mutex::new(HashMap::new()),
         language: Mutex::new(cfg.language),
         theme: Mutex::new(cfg.theme),
         flash_updated: AtomicBool::new(false),
@@ -162,23 +162,30 @@ pub fn run(silent: bool) -> eframe::Result<()> {
                 let shared = Arc::clone(&shared_for_app);
                 let ctx = cc.egui_ctx.clone();
                 std::thread::spawn(move || loop {
-                    let secs = shared.interval.load(Ordering::Relaxed).max(1);
+                    // 空闲（无 Origin）时拉长间隔，少占 CPU；有进程时用用户设定间隔。
+                    let base = shared.interval.load(Ordering::Relaxed).max(1);
+                    let idle = shared.snap.lock().unwrap().is_idle();
+                    let secs = if idle {
+                        base.saturating_mul(3).clamp(15, 60)
+                    } else {
+                        base
+                    };
                     std::thread::sleep(Duration::from_secs(secs));
                     if shared.auto.load(Ordering::Relaxed) {
                         let protect = shared.protect.lock().unwrap().clone();
                         // 无窗口自动化（PPT 嵌入等）并入自动清理，不再单独开关
                         refresh_shared(&shared);
                         let before = shared.snap.lock().unwrap().clone();
-                        let ever = shared.ever_windowed.lock().unwrap().clone();
-                        let has_work = !before.stale_pids().is_empty()
-                            || !before.auto_pids_old(&ever).is_empty();
+                        let last_win = shared.last_windowed.lock().unwrap().clone();
+                        let has_work = !before.stale_pids(&last_win).is_empty()
+                            || !before.auto_pids_old(&last_win).is_empty();
                         if has_work {
                             let zh = matches!(
                                 *shared.language.lock().unwrap(),
                                 Language::Zh
                             );
                             let (msg, report) =
-                                origin::release_with(&protect, true, &ever, zh);
+                                origin::release_with(&protect, true, &last_win, zh);
                             apply_clean_result(&shared, msg, report);
                             ctx.request_repaint();
                         } else {
@@ -498,7 +505,8 @@ impl App {
         });
 
         let snap = self.shared.snap.lock().unwrap().clone();
-        let stale_mem = snap.memory_of(&snap.stale_pids());
+        let last_win = self.shared.last_windowed.lock().unwrap().clone();
+        let stale_mem = snap.memory_of(&snap.stale_pids(&last_win));
         if stale_mem > 0 {
             ui.label(
                 egui::RichText::new(tr.stale_mem(&origin::format_bytes(stale_mem)))
@@ -690,7 +698,7 @@ impl App {
                 let mut secs = self.shared.interval.load(Ordering::Relaxed) as f32;
                 if ui
                     .add(
-                        egui::Slider::new(&mut secs, 3.0..=60.0)
+                        egui::Slider::new(&mut secs, 5.0..=60.0)
                             .suffix(tr.seconds())
                             .clamping(egui::SliderClamping::Always),
                     )
@@ -1059,15 +1067,16 @@ fn refresh_shared(shared: &Shared) {
     let protect = shared.protect.lock().unwrap().clone();
     let snap = origin::snapshot(&protect);
     {
-        let mut ever = shared.ever_windowed.lock().unwrap();
+        let mut last = shared.last_windowed.lock().unwrap();
+        let now = Instant::now();
         for p in &snap.procs {
             if p.kind == origin::ProcKind::Windowed {
-                ever.insert(p.pid);
+                last.insert(p.pid, now);
             }
         }
         // 进程已不在则丢掉记录，避免 PID 复用误判。
         let live: HashSet<u32> = snap.procs.iter().map(|p| p.pid).collect();
-        ever.retain(|pid| live.contains(pid));
+        last.retain(|pid, _| live.contains(pid));
     }
     let zh = matches!(*shared.language.lock().unwrap(), Language::Zh);
     *shared.status.lock().unwrap() = origin::format_status(&snap, zh);
@@ -1077,9 +1086,13 @@ fn refresh_shared(shared: &Shared) {
 fn apply_clean_result(shared: &Shared, msg: String, report: origin::CleanReport) {
     if report.killed > 0 {
         log::append(&msg);
+        // 只在真正清掉进程时通知；权限不足/失败只记日志，不弹窗烦用户。
         if shared.notify_on_clean.load(Ordering::Relaxed) {
             notify::toast("OringinFix", &msg);
         }
+        shared.flash_updated.store(true, Ordering::Relaxed);
+    } else if report.denied > 0 || report.failed > 0 {
+        log::append(&msg);
     }
 
     // 重新扫描，但已确认杀掉的 PID 绝不再显示（避免 Toolhelp 短暂滞后又刷回来）。
@@ -1093,14 +1106,13 @@ fn apply_clean_result(shared: &Shared, msg: String, report: origin::CleanReport)
     *shared.snap.lock().unwrap() = fresh;
     *shared.status.lock().unwrap() = msg;
     shared.need_refresh.store(true, Ordering::Relaxed);
-    shared.flash_updated.store(true, Ordering::Relaxed);
 }
 
 fn do_release_stale(shared: &Shared) {
     let protect = shared.protect.lock().unwrap().clone();
-    let ever = shared.ever_windowed.lock().unwrap().clone();
+    let last_win = shared.last_windowed.lock().unwrap().clone();
     let zh = matches!(*shared.language.lock().unwrap(), Language::Zh);
-    let (msg, report) = origin::release_with(&protect, true, &ever, zh);
+    let (msg, report) = origin::release_with(&protect, true, &last_win, zh);
     apply_clean_result(shared, msg, report);
 }
 

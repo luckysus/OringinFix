@@ -1,6 +1,7 @@
 //! Origin 进程扫描与清理（与 UI 无关）。
 
-use std::time::{Duration, SystemTime};
+use std::collections::HashMap;
+use std::time::{Duration, Instant, SystemTime};
 
 use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, FILETIME, HWND, LPARAM};
@@ -18,9 +19,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 const TARGET: &str = "Origin64.exe";
 /// 刚启动的 Origin 还没画出窗口，给它一点时间，避免把正在打开的实例误判成残留。
-pub const MIN_AGE_SECS: u64 = 10;
+pub const MIN_AGE_SECS: u64 = 15;
+/// 曾有过窗口的进程：窗口消失后再等一会，避开保存/退出动画中的误杀。
+pub const CLOSE_GRACE_SECS: u64 = 12;
 /// PPT 双击嵌入时，-Embedding 进程可能几十秒都还没画出窗口；自动清理要更保守。
 pub const EMBEDDING_ORPHAN_AGE_SECS: u64 = 90;
+
+/// `last_windowed`：上次见到可见窗口的时间（无记录 = 从未见过窗口）。
+fn past_close_grace(pid: u32, last_windowed: &HashMap<u32, Instant>) -> bool {
+    match last_windowed.get(&pid) {
+        Some(t) => t.elapsed() >= Duration::from_secs(CLOSE_GRACE_SECS),
+        None => true,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcKind {
@@ -55,10 +66,13 @@ impl Snapshot {
         self.procs.iter().filter(move |p| p.kind == kind)
     }
 
-    pub fn stale_pids(&self) -> Vec<u32> {
+    /// 可清的残留（已过启动缓冲 + 关窗宽限）。
+    pub fn stale_pids(&self, last_windowed: &HashMap<u32, Instant>) -> Vec<u32> {
         self.procs
             .iter()
-            .filter(|p| p.kind == ProcKind::Stale && !p.young)
+            .filter(|p| {
+                p.kind == ProcKind::Stale && !p.young && past_close_grace(p.pid, last_windowed)
+            })
             .map(|p| p.pid)
             .collect()
     }
@@ -72,17 +86,17 @@ impl Snapshot {
     }
 
     /// 可自动清理的无窗口自动化：
-    /// - 曾经有过窗口（编辑后关掉）→ 过了普通启动缓冲即可清
+    /// - 曾经有过窗口（编辑后关掉）→ 须过关窗宽限
     /// - 从未见过窗口 → 必须足够老，避免 PPT 刚双击、窗口还没起来就被杀掉
-    pub fn auto_pids_old(&self, ever_windowed: &std::collections::HashSet<u32>) -> Vec<u32> {
+    pub fn auto_pids_old(&self, last_windowed: &HashMap<u32, Instant>) -> Vec<u32> {
         self.procs
             .iter()
             .filter(|p| {
                 if p.kind != ProcKind::Automation || p.young {
                     return false;
                 }
-                if ever_windowed.contains(&p.pid) {
-                    return true;
+                if last_windowed.contains_key(&p.pid) {
+                    return past_close_grace(p.pid, last_windowed);
                 }
                 matches!(p.age_secs, Some(a) if a >= EMBEDDING_ORPHAN_AGE_SECS)
             })
@@ -201,22 +215,22 @@ pub fn report_check(protect_args: &[String]) -> String {
 }
 
 pub fn release(protect_args: &[String], zh: bool) -> (String, CleanReport) {
-    let empty = std::collections::HashSet::new();
+    let empty = HashMap::new();
     release_with(protect_args, false, &empty, zh)
 }
 
 /// `include_embedding`：同时清理「可自动清理」的无窗口 -Embedding。
-/// `ever_windowed`：本工具观察到曾经有过窗口的 PID（编辑后关掉的可清；刚启动未出窗的不能清）。
+/// `last_windowed`：上次见到可见窗口的时间（关窗宽限 / 区分 PPT 未出窗）。
 pub fn release_with(
     protect_args: &[String],
     include_embedding: bool,
-    ever_windowed: &std::collections::HashSet<u32>,
+    last_windowed: &HashMap<u32, Instant>,
     zh: bool,
 ) -> (String, CleanReport) {
     let s = snapshot(protect_args);
-    let mut pids = s.stale_pids();
+    let mut pids = s.stale_pids(last_windowed);
     if include_embedding {
-        pids.extend(s.auto_pids_old(ever_windowed));
+        pids.extend(s.auto_pids_old(last_windowed));
     }
     pids.sort_unstable();
     pids.dedup();
@@ -321,6 +335,11 @@ fn clean_pids(
     report.skipped_young = young.len();
 
     for pid in old {
+        // 动手前再看一眼：若又出现可见窗口，绝不杀（用户可能刚重新打开/取消退出）。
+        if !pids_with_window(&[pid]).is_empty() {
+            report.skipped_young += 1;
+            continue;
+        }
         match terminate(pid) {
             Ok(()) => {
                 // 必须以进程快照为准：TerminateProcess 后 OpenProcess 可能已失败，

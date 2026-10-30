@@ -55,6 +55,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/OringinFix-Setup-*-windows-x64.exe
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.zh.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

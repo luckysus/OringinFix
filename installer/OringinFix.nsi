@@ -1,6 +1,6 @@
 ﻿; OringinFix — NSIS 3 (Unicode + MUI2)
-; 构建：cargo build --release 后 makensis /DVERSION=0.1.0 installer\OringinFix.nsi
-; 输出：dist\OringinFix-Setup-x.y.z.exe
+; 构建：cargo build --release 后 makensis /DVERSION=0.1.1 installer\OringinFix.nsi
+; 输出：dist\OringinFix-Setup-x.y.z-windows-x64.exe
 
 Unicode true
 CRCCheck on
@@ -8,7 +8,7 @@ SetCompressor /SOLID lzma
 ManifestDPIAware true
 
 !ifndef VERSION
-  !define VERSION "0.1.0"
+  !define VERSION "0.1.1"
 !endif
 
 !define APP_NAME "OringinFix"

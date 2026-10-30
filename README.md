@@ -5,7 +5,11 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Release](https://img.shields.io/github/v/release/luckysus/OringinFix)](https://github.com/luckysus/OringinFix/releases)
 
-轻量 Windows 工具：安全清理 **OriginLab Origin** 关闭后残留的后台进程（`Origin64.exe`）。
+**Origin 关掉后进程还在？装上忘了就行。**
+
+面向 **Origin 2025**（及同系列 Windows 版）的轻量托盘工具：安全清理关闭后残留的 `Origin64.exe`，有窗口 / PPT 嵌入中的实例不会乱动。
+
+官方也承认关闭后进程可能仍留在后台，见 [FAQ-1213](https://docs.originlab.com/quick-help/origin-process-remain-after-exit/)。
 
 - GitHub：<https://github.com/luckysus/OringinFix>
 - Gitee：<https://gitee.com/neusu/OringinFix>
@@ -13,20 +17,21 @@
 
 ## 背景
 
-Origin 有时在关闭主窗口后仍会留下无界面的后台进程，占用内存并影响再次启动。手动在任务管理器里结束进程既麻烦，也容易误杀正在使用或自动化脚本拉起的实例。
+Origin 2025 等版本在关掉主窗口后，有时仍会留下无界面后台进程，占内存、拖慢再次启动。手动在任务管理器里结束既麻烦，也容易误杀正在使用或自动化脚本拉起的实例。
 
-OringinFix 只针对真正「无窗口且非自动化」的残留进程，尽量做到可放心常开。
+OringinFix 常驻托盘自动巡检，只清真正的残留，尽量做到装完就不用再管。
 
 ## 功能
 
 - **一键清理**：识别并结束残留的 `Origin64.exe`
 - **清理自动化**：可二次确认后清理 `-Embedding` 实例
-- **自动巡检**：默认每 5 秒检查一次（可关，设置会写入 `%AppData%\OringinFix\config.toml`）
+- **自动巡检**：默认约 8 秒检查一次；无 Origin 时自动拉长间隔（可关，写入 `%AppData%\OringinFix\config.toml`）
 - **系统托盘**：关闭窗口隐藏到托盘；菜单支持显示 / 清理 / 自动清理 / 开机自启 / 退出
 - **开机自启**：可选写入当前用户 Run 键
-- **保护在用实例**：有可见窗口的进程不会被清理
-- **保护 COM 自动化**：默认不自动清理 `-Embedding` 实例
-- **启动缓冲**：进程存活不足 10 秒时暂不处理
+- **保护在用实例**：有可见窗口的进程不会被清理；动手前再确认一次
+- **保护 COM 自动化**：默认不自动清理未出窗的 `-Embedding`；见过窗口的须过关窗宽限
+- **启动缓冲**：进程存活不足 15 秒时暂不处理
+- **关窗宽限**：曾有过窗口的实例，窗口消失后再等约 12 秒才清，避免退出过程中误杀
 - **轻量界面**：无边框小窗，Acrylic / Mica；中文优先用系统字体以减小体积
 
 ## 工作原理
@@ -37,7 +42,8 @@ OringinFix 只针对真正「无窗口且非自动化」的残留进程，尽量
 |------|----------|------|
 | 在用 | 存在可见且标题非空的窗口 | 保留 |
 | 自动化 | 命令行包含 `-Embedding` | 默认保留（可手动确认清理） |
-| 刚启动 | 无窗口，但存活时间 &lt; 10 秒 | 暂不处理 |
+| 刚启动 | 无窗口，但存活时间 &lt; 15 秒 | 暂不处理 |
+| 刚关窗 | 曾有窗口，消失不足约 12 秒 | 暂不处理 |
 | 残留 | 无窗口、非自动化、已运行足够久 | 可清理 |
 
 终止前会再次核对进程镜像文件名；失败时会区分「权限不足」等结果。
@@ -126,7 +132,7 @@ $env:ORINGINFIX_TARGET = "SomeOther.exe"
 
 ```toml
 auto_clean = true
-interval_secs = 5
+interval_secs = 8
 start_with_windows = false
 ```
 
