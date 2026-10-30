@@ -49,14 +49,11 @@ OringinFix 只针对真正「无窗口且非自动化」的残留进程，尽量
 
 ## 安装
 
-### 预编译（推荐安装包）
+### 预编译
 
 从 [Releases](https://github.com/luckysus/OringinFix/releases) 下载：
 
-| 文件 | 说明 |
-|------|------|
-| `OringinFix-Setup-x.y.z.exe` | **安装包**：开始菜单、可选开机自启；卸载时可清除 `%AppData%\OringinFix` 与开机项 |
-| `OringinFix.exe` | 绿色版，下载即用 |
+`OringinFix-Setup-x.y.z-windows-x64.exe` — 安装包（开始菜单；卸载时可清除 `%AppData%\OringinFix` 与开机项）
 
 安装无需管理员（默认装到 `%LocalAppData%\Programs\OringinFix`）。
 
@@ -78,7 +75,7 @@ cargo build --release
 .\installer\build.ps1
 ```
 
-输出：`dist\OringinFix-Setup-<version>.exe`（当前用户安装、可选桌面快捷方式；卸载时可清除 `%AppData%\OringinFix`）
+输出：`dist\OringinFix-Setup-<version>-windows-x64.exe`（当前用户安装、可选桌面快捷方式；卸载时可清除 `%AppData%\OringinFix`）
 
 国内用户可改用 Gitee：
 

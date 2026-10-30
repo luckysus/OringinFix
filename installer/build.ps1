@@ -34,7 +34,7 @@ cargo build --release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force -Path "$Root\dist" | Out-Null
-$out = "$Root\dist\OringinFix-Setup-$Version.exe"
+$out = "$Root\dist\OringinFix-Setup-$Version-windows-x64.exe"
 if (Test-Path $out) { Remove-Item $out -Force }
 
 # NSIS Unicode 脚本须为 UTF-8 BOM
@@ -49,6 +49,6 @@ Write-Host "==> makensis  OringinFix $Version"
 & $Makensis "/DVERSION=$Version" $nsi
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Get-ChildItem "$Root\dist\OringinFix-Setup-*.exe" | ForEach-Object {
+Get-ChildItem "$Root\dist\OringinFix-Setup-*-windows-x64.exe" | ForEach-Object {
     Write-Host "OK  $($_.FullName)  ($([math]::Round($_.Length/1MB, 2)) MB)"
 }

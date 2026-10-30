@@ -48,17 +48,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OringinFix-windows-x64
-          path: |
-            target/release/OringinFix.exe
-            dist/OringinFix-Setup-*.exe
+          path: dist/OringinFix-Setup-*-windows-x64.exe
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            target/release/OringinFix.exe
-            dist/OringinFix-Setup-*.exe
+          files: dist/OringinFix-Setup-*-windows-x64.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

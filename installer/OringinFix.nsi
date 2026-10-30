@@ -22,7 +22,7 @@ ManifestDPIAware true
 Name "${APP_NAME}"
 Caption "安装 ${APP_NAME}"
 UninstallCaption "卸载 ${APP_NAME}"
-OutFile "..\dist\${APP_NAME}-Setup-${VERSION}.exe"
+OutFile "..\dist\${APP_NAME}-Setup-${VERSION}-windows-x64.exe"
 InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 InstallDirRegKey HKCU "${REG_UNINST}" "InstallLocation"
 RequestExecutionLevel user
