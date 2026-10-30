@@ -1,5 +1,8 @@
 /target/
+/dist/
 *.pdb
 .DS_Store
 Thumbs.db
 assets/app_preview.png
+# 可选旁路字体（不再嵌入二进制；本地调试可保留）
+# assets/NotoSansSC-Regular.ttf

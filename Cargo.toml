@@ -2,16 +2,34 @@
 name = "OringinFix"
 version = "0.1.0"
 edition = "2024"
+description = "Safe cleaner for leftover OriginLab Origin (Origin64.exe) background processes on Windows"
+authors = ["su <1853097312@qq.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/luckysus/OringinFix"
+homepage = "https://github.com/luckysus/OringinFix"
+keywords = ["originlab", "windows", "process", "utility"]
+categories = ["command-line-utilities", "gui"]
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
 window-vibrancy = "0.6"
 raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tray-icon = "0.21"
+image = { version = "0.25", default-features = false, features = ["png"] }
+notify-rust = "4"
+ureq = { version = "3", default-features = true }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
     "Win32_System_Console",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
     "Wdk_System_Threading",
