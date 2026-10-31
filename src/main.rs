@@ -44,5 +44,6 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    update::sweep_temp_installers();
     app::run(silent)
 }

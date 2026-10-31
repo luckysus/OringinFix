@@ -25,7 +25,7 @@ use crate::log::{self, LogEntry};
 use crate::notify;
 use crate::origin::{self, ProcKind, Snapshot};
 use crate::startup;
-use crate::update::{self, CheckResult};
+use crate::update::{self, CheckResult, DownloadMsg};
 
 const HINT_FADE_SECS: f64 = 1.8;
 
@@ -86,9 +86,17 @@ pub struct App {
     hint_until: Option<Instant>,
     last_dark: Option<bool>,
     update_rx: Option<Receiver<CheckResult>>,
+    download_rx: Option<Receiver<DownloadMsg>>,
     update_msg: Option<String>,
     update_url: Option<String>,
+    update_download_url: Option<String>,
+    update_latest: Option<String>,
+    /// 已下载待安装的 Setup 路径
+    update_ready_path: Option<std::path::PathBuf>,
+    update_progress: Option<u8>,
     update_checking: bool,
+    update_downloading: bool,
+    update_installing: bool,
 }
 
 pub fn run(silent: bool) -> eframe::Result<()> {
@@ -304,9 +312,16 @@ pub fn run(silent: bool) -> eframe::Result<()> {
                 hint_until: None,
                 last_dark: Some(resolve_dark(cfg.theme)),
                 update_rx: None,
+                download_rx: None,
                 update_msg: None,
                 update_url: None,
+                update_download_url: None,
+                update_latest: None,
+                update_ready_path: None,
+                update_progress: None,
                 update_checking: false,
+                update_downloading: false,
+                update_installing: false,
             }))
         }),
     )
@@ -424,7 +439,8 @@ impl eframe::App for App {
         }
 
         self.poll_update_check(tr);
-        if self.update_checking {
+        self.poll_update_download(tr);
+        if self.update_checking || self.update_downloading || self.update_installing {
             ui.ctx().request_repaint_after(Duration::from_millis(200));
         }
         if self
@@ -837,17 +853,61 @@ impl App {
     }
 
     fn start_update_check(&mut self) {
-        if self.update_checking {
+        if self.update_checking || self.update_downloading || self.update_installing {
             return;
         }
         self.update_checking = true;
         self.update_msg = None;
         self.update_url = None;
+        self.update_download_url = None;
+        self.update_latest = None;
+        self.update_ready_path = None;
+        self.update_progress = None;
         let (tx, rx) = mpsc::channel();
         self.update_rx = Some(rx);
         std::thread::spawn(move || {
             let _ = tx.send(update::check_latest(APP_VERSION));
         });
+    }
+
+    fn start_update_download(&mut self) {
+        if self.update_downloading || self.update_installing {
+            return;
+        }
+        let Some(url) = self.update_download_url.clone() else {
+            return;
+        };
+        let latest = self
+            .update_latest
+            .clone()
+            .unwrap_or_else(|| "latest".into());
+        self.update_downloading = true;
+        self.update_progress = None;
+        self.update_ready_path = None;
+        self.update_msg = None;
+        let (tx, rx) = mpsc::channel();
+        self.download_rx = Some(rx);
+        std::thread::spawn(move || {
+            update::download_installer(&url, &latest, &tx);
+        });
+    }
+
+    fn start_silent_install(&mut self, tr: Tr) {
+        if self.update_installing {
+            return;
+        }
+        let Some(path) = self.update_ready_path.clone() else {
+            return;
+        };
+        self.update_installing = true;
+        self.update_msg = None;
+        match update::launch_silent_installer(&path) {
+            Ok(()) => request_exit(&self.shared),
+            Err(err) => {
+                self.update_installing = false;
+                self.update_msg = Some(tr.about_download_failed(&err));
+            }
+        }
     }
 
     fn poll_update_check(&mut self, tr: Tr) {
@@ -862,18 +922,34 @@ impl App {
                     CheckResult::UpToDate { latest } => {
                         self.update_msg = Some(tr.about_up_to_date(&latest));
                         self.update_url = None;
+                        self.update_download_url = None;
+                        self.update_latest = None;
+                        self.update_ready_path = None;
                     }
-                    CheckResult::Available { latest, url } => {
+                    CheckResult::Available {
+                        latest,
+                        url,
+                        download_url,
+                    } => {
                         self.update_msg = Some(tr.about_update_available(&latest));
                         self.update_url = Some(url);
+                        self.update_download_url = download_url;
+                        self.update_latest = Some(latest);
+                        self.update_ready_path = None;
                     }
                     CheckResult::NoRelease => {
                         self.update_msg = Some(tr.about_no_release().to_owned());
                         self.update_url = Some(URL_RELEASES.to_string());
+                        self.update_download_url = None;
+                        self.update_latest = None;
+                        self.update_ready_path = None;
                     }
                     CheckResult::Failed(err) => {
                         self.update_msg = Some(tr.about_check_failed(&err));
                         self.update_url = Some(URL_RELEASES.to_string());
+                        self.update_download_url = None;
+                        self.update_latest = None;
+                        self.update_ready_path = None;
                     }
                 }
             }
@@ -882,6 +958,44 @@ impl App {
                 self.update_rx = None;
                 self.update_checking = false;
                 self.update_msg = Some(tr.about_check_failed("disconnected"));
+            }
+        }
+    }
+
+    fn poll_update_download(&mut self, tr: Tr) {
+        let Some(rx) = self.download_rx.as_ref() else {
+            return;
+        };
+        loop {
+            match rx.try_recv() {
+                Ok(DownloadMsg::Progress { percent }) => {
+                    self.update_progress = percent;
+                }
+                Ok(DownloadMsg::Ready(path)) => {
+                    self.download_rx = None;
+                    self.update_downloading = false;
+                    self.update_progress = Some(100);
+                    self.update_ready_path = Some(path);
+                    let latest = self.update_latest.as_deref().unwrap_or("?");
+                    self.update_msg = Some(tr.about_update_ready(latest));
+                    return;
+                }
+                Ok(DownloadMsg::Failed(err)) => {
+                    self.download_rx = None;
+                    self.update_downloading = false;
+                    self.update_progress = None;
+                    self.update_ready_path = None;
+                    self.update_msg = Some(tr.about_download_failed(&err));
+                    return;
+                }
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    self.download_rx = None;
+                    self.update_downloading = false;
+                    self.update_progress = None;
+                    self.update_msg = Some(tr.about_download_failed("disconnected"));
+                    return;
+                }
             }
         }
     }
@@ -905,6 +1019,16 @@ impl App {
                 let row_h = 30.0;
                 let update_msg = self.update_msg.clone();
                 let update_url = self.update_url.clone();
+                let can_download = self.update_download_url.is_some()
+                    && self.update_ready_path.is_none()
+                    && !self.update_downloading
+                    && !self.update_installing;
+                let can_install =
+                    self.update_ready_path.is_some() && !self.update_installing;
+                let dl_label = match self.update_progress {
+                    Some(p) => tr.about_downloading_pct(p),
+                    None => tr.about_downloading().to_owned(),
+                };
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), row_h),
                     egui::Layout::left_to_right(egui::Align::Center),
@@ -920,7 +1044,19 @@ impl App {
                             .size(14.5)
                             .color(palette.text),
                         );
-                        if self.update_checking {
+                        if self.update_installing {
+                            ui.label(
+                                egui::RichText::new(tr.about_installing())
+                                    .size(13.5)
+                                    .color(palette.muted),
+                            );
+                        } else if self.update_downloading {
+                            ui.label(
+                                egui::RichText::new(dl_label)
+                                    .size(13.5)
+                                    .color(palette.muted),
+                            );
+                        } else if self.update_checking {
                             ui.label(
                                 egui::RichText::new(tr.about_checking())
                                     .size(13.5)
@@ -930,15 +1066,29 @@ impl App {
                             self.start_update_check();
                         }
                         if let Some(msg) = &update_msg {
-                            ui.label(
-                                egui::RichText::new(msg.as_str())
-                                    .size(13.5)
-                                    .color(palette.muted),
-                            );
+                            if !self.update_downloading && !self.update_installing {
+                                ui.label(
+                                    egui::RichText::new(msg.as_str())
+                                        .size(13.5)
+                                        .color(palette.muted),
+                                );
+                            }
+                        }
+                        if can_download {
+                            if link_chip(ui, tr.about_download_update(), palette) {
+                                self.start_update_download();
+                            }
+                        }
+                        if can_install {
+                            if link_chip(ui, tr.about_install_now(), palette) {
+                                self.start_silent_install(tr);
+                            }
                         }
                         if let Some(url) = &update_url {
-                            if link_chip(ui, tr.about_open_release(), palette) {
-                                open_url(url);
+                            if !self.update_installing {
+                                if link_chip(ui, tr.about_open_release(), palette) {
+                                    open_url(url);
+                                }
                             }
                         }
                     },

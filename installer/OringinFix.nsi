@@ -1,5 +1,5 @@
 ﻿; OringinFix — NSIS 3 (Unicode + MUI2)
-; 构建：cargo build --release 后 makensis /DVERSION=0.1.1 installer\OringinFix.nsi
+; 构建：cargo build --release 后 makensis /DVERSION=0.1.2 installer\OringinFix.nsi
 ; 输出：dist\OringinFix-Setup-x.y.z-windows-x64.exe
 
 Unicode true
@@ -8,7 +8,7 @@ SetCompressor /SOLID lzma
 ManifestDPIAware true
 
 !ifndef VERSION
-  !define VERSION "0.1.1"
+  !define VERSION "0.1.2"
 !endif
 
 !define APP_NAME "OringinFix"
@@ -38,6 +38,7 @@ BrandingText " "
 !define MUI_UNICON "..\assets\app.ico"
 
 Var CreateDesktop
+Var AutoRun
 Var TasksDialog
 Var DesktopCheck
 Var ClearUserData
@@ -67,6 +68,24 @@ VIAddVersionKey /LANG=${LANG_SIMPCHINESE} "LegalCopyright" "${APP_PUBLISHER}"
 
 Function .onInit
   StrCpy $CreateDesktop "0"
+  StrCpy $AutoRun "0"
+  ${GetParameters} $0
+  ${GetOptions} $0 "/AUTORUN=" $1
+  ${If} $1 == "1"
+    StrCpy $AutoRun "1"
+  ${EndIf}
+  ; 静默更新：保留已有桌面快捷方式，不擅自新建
+  IfSilent 0 done_init
+    IfFileExists "$DESKTOP\${APP_NAME}.lnk" 0 done_init
+      StrCpy $CreateDesktop "1"
+  done_init:
+FunctionEnd
+
+Function .onInstSuccess
+  ; 应用内更新传入 /S /AUTORUN=1：装完直接拉起，对齐 DBX「装完回来」
+  ${If} $AutoRun == "1"
+    Exec '"$INSTDIR\${APP_EXE}"'
+  ${EndIf}
 FunctionEnd
 
 Function TasksPageCreate
@@ -102,6 +121,11 @@ Function TasksPageLeave
 FunctionEnd
 
 Section "Install"
+  ; 覆盖安装前结束旧进程，避免 exe 被锁导致静默更新失败
+  nsExec::ExecToLog 'taskkill /F /IM ${APP_EXE} /T'
+  Pop $0
+  Sleep 400
+
   SetOutPath "$INSTDIR"
   File "..\target\release\${APP_EXE}"
 

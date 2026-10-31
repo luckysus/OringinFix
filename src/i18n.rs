@@ -61,6 +61,39 @@ impl Tr {
     pub fn about_open_release(self) -> &'static str {
         if self.zh() { "打开下载页" } else { "Open download" }
     }
+    pub fn about_download_update(self) -> &'static str {
+        if self.zh() { "下载更新" } else { "Download update" }
+    }
+    pub fn about_install_now(self) -> &'static str {
+        if self.zh() { "立即安装" } else { "Install now" }
+    }
+    pub fn about_downloading(self) -> &'static str {
+        if self.zh() { "正在下载…" } else { "Downloading…" }
+    }
+    pub fn about_downloading_pct(self, pct: u8) -> String {
+        if self.zh() {
+            format!("正在下载… {pct}%")
+        } else {
+            format!("Downloading… {pct}%")
+        }
+    }
+    pub fn about_update_ready(self, latest: &str) -> String {
+        if self.zh() {
+            format!("v{latest} 已就绪")
+        } else {
+            format!("v{latest} ready")
+        }
+    }
+    pub fn about_installing(self) -> &'static str {
+        if self.zh() { "正在安装…" } else { "Installing…" }
+    }
+    pub fn about_download_failed(self, err: &str) -> String {
+        if self.zh() {
+            format!("更新失败：{err}")
+        } else {
+            format!("Update failed: {err}")
+        }
+    }
     pub fn about_check_failed(self, err: &str) -> String {
         if self.zh() {
             format!("检查失败：{err}")
